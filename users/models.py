@@ -51,14 +51,14 @@ class User(AbstractUser, BaseModel):
         return code
     
     def check_username(self):
-        if not self.pk:
+        if not self.username:
             temp_username = f"username{str(uuid.uuid4()).split('-')[-1]}"
             while User.objects.filter(username=temp_username).exists():
                 temp_username = f"{temp_username}{random.randint(0, 9)}"
             self.username = temp_username
 
     def check_pass(self):
-        if not self.pk:
+        if not self.username:
             temp_pass = f"password{str(uuid.uuid4()).split('-')[-1]}"
             self.password = temp_pass
     
@@ -72,10 +72,11 @@ class User(AbstractUser, BaseModel):
     
     def token(self):
         refresh = RefreshToken.for_user(self)
-        return {
+        data = {
             'access': str(refresh.access_token),
-            'refresh-token': refresh
+            'refresh-token': str(refresh)
         }
+        return data
 
 
     def clean(self):
