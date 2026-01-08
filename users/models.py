@@ -4,6 +4,8 @@ from django.core.validators import FileExtensionValidator
 from shared.models import BaseModel
 from datetime import datetime, timedelta
 import random
+import uuid
+from rest_framework_simplejwt.tokens import RefreshToken
 
 ORDINARY_USER, MANAGER, ADMIN = ('ordinary_user', 'manager', 'admin')
 NEW, CODE_VERIFIED, DONE, PHOTO_DONE = ('new', 'code_verified', 'done', 'photo_done')
@@ -31,7 +33,7 @@ class User(AbstractUser, BaseModel):
     auth_type = models.CharField(max_length=29, choices=AUTH_TYPE)
     phone_number = models.CharField(max_length=13, null=True, blank=True, unique=True)
     email = models.EmailField(unique=True, blank=True, null=True)
-    photo = models.ImageField(upload_to='users_photo/', default = 'user_photo/default_user.png', null = True,\
+    photo = models.ImageField(upload_to='users_photo/', null = True,\
                               blank = True, validators=[FileExtensionValidator(allowed_extensions=['png', 'jpg', 'jpeg'])])
     
 
@@ -47,8 +49,56 @@ class User(AbstractUser, BaseModel):
             verify_type = verify_type,
         )
         return code
-
     
+    def check_username(self):
+        if not self.pk:
+            temp_username = f"username{str(uuid.uuid4()).split('-')[-1]}"
+            while User.objects.filter(username=temp_username).exists():
+                temp_username = f"{temp_username}{random.randint(0, 9)}"
+            self.username = temp_username
+
+    def check_pass(self):
+        if not self.pk:
+            temp_pass = f"password{str(uuid.uuid4()).split('-')[-1]}"
+            self.password = temp_pass
+    
+    def hashing_pass(self):
+        if not self.password.startswith('pbkdf2_sha256'):
+            self.set_password(self.password)
+
+    def check_email(self):
+        if self.email:
+            self.email = self.email.lower()
+    
+    def token(self):
+        refresh = RefreshToken.for_user(self)
+        return {
+            'access': str(refresh.access_token),
+            'refresh-token': refresh
+        }
+
+
+    def clean(self):
+        self.check_username()
+        self.check_email()
+        # self.check_password()
+        self.hashing_pass()
+
+    def save(self, *args, **kwargs):
+    # Convert empty email to NULL
+        if self.email == "":
+            self.email = None
+
+    # Normalize email
+        if self.email:
+            self.email = self.email.lower()
+
+        self.clean()
+        return super(User, self).save(*args, **kwargs)
+    
+   
+
+
 EXPIRATION_EMAIL = 3
 EXPIRATION_PHONE = 2
 
@@ -60,7 +110,7 @@ class UserConfirmation(BaseModel):
 
     code = models.CharField(max_length=4)
     verify_type = models.CharField(max_length=29, choices=VERIFY_TYPE)
-    user = models.ForeignKey('users.User', on_delete=models.CASCADE)
+    user = models.ForeignKey('users.User', on_delete=models.CASCADE, related_name='codes')
     expiration_time = models.DateTimeField()
     confirmed = models.BooleanField(default=False)
 
@@ -72,11 +122,11 @@ class UserConfirmation(BaseModel):
         if self.verify_type == VIA_EMAIL:
             self.expiration_time = datetime.now() + timedelta(minutes = EXPIRATION_EMAIL)
         else:
-            self.expiration_time = datetime.now() = timedelta(minutes = EXPIRATION_PHONE)
+            self.expiration_time = datetime.now() + timedelta(minutes = EXPIRATION_PHONE)
 
         super(UserConfirmation, self).save(*args, **kwargs)
 
 
 
 
-
+  
