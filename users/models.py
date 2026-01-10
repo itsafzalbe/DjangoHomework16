@@ -4,6 +4,7 @@ from django.core.validators import FileExtensionValidator
 from shared.models import BaseModel
 from datetime import datetime, timedelta
 import random
+from django.utils.timezone import now
 import uuid
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -57,13 +58,13 @@ class User(AbstractUser, BaseModel):
                 temp_username = f"{temp_username}{random.randint(0, 9)}"
             self.username = temp_username
 
-    def check_pass(self):
-        if not self.username:
-            temp_pass = f"password{str(uuid.uuid4()).split('-')[-1]}"
-            self.password = temp_pass
+    # def check_pass(self):
+    #     if not self.username:
+    #         temp_pass = f"password{str(uuid.uuid4()).split('-')[-1]}"
+    #         self.password = temp_pass
     
     def hashing_pass(self):
-        if not self.password.startswith('pbkdf2_sha256'):
+        if self.password and not self.password.startswith('pbkdf2_'):
             self.set_password(self.password)
 
     def check_email(self):
@@ -74,10 +75,15 @@ class User(AbstractUser, BaseModel):
         refresh = RefreshToken.for_user(self)
         data = {
             'access': str(refresh.access_token),
-            'refresh-token': str(refresh)
+            'refresh': str(refresh)
         }
         return data
-
+    
+    def can_resend_code(self):
+        last_code = self.codes.filter(confirmed=False).order_by('-created_at').first()
+        if not last_code:
+            return True
+        return last_code.expiration_time < now()
 
     def clean(self):
         self.check_username()
@@ -121,9 +127,9 @@ class UserConfirmation(BaseModel):
     
     def save(self, *args, **kwargs):
         if self.verify_type == VIA_EMAIL:
-            self.expiration_time = datetime.now() + timedelta(minutes = EXPIRATION_EMAIL)
+            self.expiration_time = now() + timedelta(minutes = EXPIRATION_EMAIL)
         else:
-            self.expiration_time = datetime.now() + timedelta(minutes = EXPIRATION_PHONE)
+            self.expiration_time = now() + timedelta(minutes = EXPIRATION_PHONE)
 
         super(UserConfirmation, self).save(*args, **kwargs)
 
