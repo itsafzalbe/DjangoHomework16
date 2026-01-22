@@ -1,0 +1,1 @@
+DRF reset/forgot vazifasini bugun 22 kechgacha bajarib qoyaman,
