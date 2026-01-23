@@ -1,13 +1,19 @@
 from rest_framework import serializers
-from rest_framework.exceptions import ValidationError
-from .models import User, VIA_EMAIL, VIA_PHONE, CODE_VERIFIED, DONE, PHOTO_DONE
+from rest_framework.exceptions import ValidationError, NotFound
+from rest_framework_simplejwt.exceptions import TokenBackendExpiredToken
+from rest_framework_simplejwt.serializers import TokenObtainSerializer, TokenObtainPairSerializer, AuthUser
+from rest_framework_simplejwt.tokens import Token
+
+from .models import User, VIA_EMAIL, VIA_PHONE, CODE_VERIFIED, DONE, PHOTO_DONE, NEW
 from shared.utility import email_or_phone_number
-from shared.utility import send_email # send_phone_number_sms
+from shared.utility import send_email, check_userinputtype # send_phone_number_sms,
 from django.contrib.auth.password_validation import validate_password
+from django.contrib.auth import authenticate
+from django.db.models import Q
 
 
 #auth_validate --> phone_number or email
-#create  ---> send_mail or sendPhone
+#create ---> send_mail or sendPhone
 #validate_email_phone_number= --> email or phone_number exists
 
 class SignUpSerializer(serializers.ModelSerializer):
@@ -292,8 +298,111 @@ class UserPhotoSerializer(serializers.Serializer):
             instance.save()
         return instance
 
-        
+class LoginSerializer(TokenObtainPairSerializer):
+    def __init__(self, instance = None, data = ..., **kwargs):
+        super(LoginSerializer, self).__init__(instance, data, **kwargs)
+        self.fields['userinput'] = serializers.CharField(required = True)
+        self.fileds['username'] = serializers.CharField(required = False, read_only = True)
+
+    def auth_validate(self, data):
+        userinput = data.get('userinput')
+        password = data.get('password')
+        usertype = check_userinputtype(userinput)
+        if usertype == 'username':
+            username = userinput
+        elif usertype == 'email':
+            user = User.objects.filter(email__iexact = userinput).first()
+            self.get_user(user)
+            username = user.username
+        elif usertype == 'phone':
+            user = User.objects.filter(phone_number = userinput).first()
+            self.get_user(user)
+            username = user.username
+        else:
+            data  = {
+                'success': False,
+                'message': 'Login Xato'
+            }
+            raise ValidationError(data)
+        authenticated_kwargs = {
+            self.username_field: username,
+            'password': password
+        }
+        user = authenticate(**authenticated_kwargs) # None
+        if user and user.auth_status in [NEW, CODE_VERIFIED]:
+            raise ValidationError({
+                'success': False,
+                'message': "Siz hali login qila olmaysiz(toliq royhatdan oting)"
+            })
+        if not user:
+            raise ValidationError({
+                'success': False,
+                'message': "Login yoki parol xato"
+            })
+        self.user = user
+        return data
+    def get_user(user):
+        if not user:
+            raise ValidationError({
+                'success': False,
+                'message': "Foydalanuvchi topilmadi"
+            })
+        return user
+    
+    def validate(self, attrs):
+        data = self.auth_validate(attrs)
+        data = self.user.token()
+        data['auth_status'] = self.user.auth_status
+
+        return data
+    
+class LogoutSerializer(serializers.Serializer):
+    refresh = serializers.CharField()
 
 
 
-            
+class ForgotPasswordSerializer(serializers.Serializer):
+    email_or_phone_ = serializers.CharField(write_only = True, required = True)
+
+    def validate(self, attrs):
+        email_or_phone_ = attrs.get('email_or_phone_', None)
+        if email_or_phone_ is None:
+            raise ValidationError({
+                'success': False,
+                'message': 'Email yoki telefon raqami kiritilishi shart!'
+            })
+        user = User.objects.filter(Q(phone_number = email_or_phone_) | Q(email= email_or_phone_))
+        if not user.exists():
+            raise NotFound(detail="User not found")
+        attrs['user'] = user.first()
+        return attrs
+
+
+class ResetPasswordSerializer(serializers.ModelSerializer):
+    id = serializers.UUIDField(read_only = True)
+    password = serializers.CharField(min_length = 8, required = True, write_only = True)
+    confirm_password = serializers.CharField(min_length = 8, required = True, write_only = True)
+
+    class Meta:
+        model = User
+        fields = (
+            'id',
+            'password',
+            'confirm_password'
+        )
+    def validate(self, data):
+        password = data.get('password', None)
+        confirm_password = data.get('confirm_password', None)
+        if password != confirm_password:
+            raise ValidationError({
+                'success': False,
+                'message': "Parollar bir biriga mos kelmaydi"
+            })
+        if password:
+            validate_password(password)
+        return data
+    
+    def update(self, instance, validated_data):
+        password = validated_data.pop('password')
+        instance.set_password(password)
+        return super(ResetPasswordSerializer, self).update(instance, validated_data)

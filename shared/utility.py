@@ -5,6 +5,7 @@ from django.conf import settings
 from rest_framework.exceptions import ValidationError
 email_regex = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE)
 phone_regex = re.compile(r"^(\+998|998)?[0-9]{9}$")
+username_regex = re.compile(r"^[a-zA-Z0-9_]{6,16}$")
 
 
 def email_or_phone_number(email_phone_number):
@@ -36,3 +37,21 @@ def send_email(email, code):
         fail_silently = False,
 
     )
+
+def check_userinputtype(userinput):
+    if re.fullmatch(email_regex, userinput):
+        data = 'email'
+    elif re.fullmatch(phone_regex, userinput):
+        data = 'phone'
+    elif re.fullmatch(username_regex, userinput):
+        data = 'username'
+    
+    else:
+        data = {
+            'success': 'False',
+            'message': 'Telefon raqam, email, username xato kiritlgan bolishi mumkin'
+        }
+        
+        raise ValidationError(data)
+    
+    return data
